@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
 
 class BelumMenikahForm extends StatefulWidget {
   final VoidCallback onSubmit;
@@ -24,9 +26,12 @@ class _BelumMenikahFormState extends State<BelumMenikahForm> {
   final _estimasiMaharController = TextEditingController();
   final _estimasiSeserahanController = TextEditingController();
 
+  bool _isLoading = false;
+
   @override
   void dispose() {
     _gajiController.dispose();
+
     _pendapatanTambahanController.dispose();
     _pengeluaranController.dispose();
     _hutangController.dispose();
@@ -38,11 +43,83 @@ class _BelumMenikahFormState extends State<BelumMenikahForm> {
     super.dispose();
   }
 
-  void _submitForm() {
-    if (_formKey.currentState!.validate()) {
-      // TODO: Save data to Firebase and/or use Gemini for analysis
-      widget.onSubmit();
+  Future<void> _submitForm() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final apiKey = dotenv.env['GEMINI_API_KEY'];
+      if (apiKey == null || apiKey.isEmpty) {
+        throw Exception("API Key Gemini tidak ditemukan di .env");
+      }
+
+      final model = GenerativeModel(model: 'gemini-2.0-flash-001', apiKey: apiKey);
+
+      final prompt =
+          '''
+      Saya sedang merencanakan pernikahan. Tolong berikan analisis finansial dan proyeksi stabilitas pasca-nikah berdasarkan data berikut:
+      - Gaji Bulanan: Rp ${_gajiController.text}
+      - Pendapatan Tambahan: Rp ${_pendapatanTambahanController.text}
+      - Pengeluaran Bulanan: Rp ${_pengeluaranController.text}
+      - Hutang/Cicilan: Rp ${_hutangController.text}
+      - Total Aset: Rp ${_asetController.text}
+      - Tabungan Saat Ini: Rp ${_tabunganController.text}
+      - Target Menikah: $_targetNikahTahun tahun lagi
+      - Estimasi Biaya Resepsi: Rp ${_estimasiResepsiController.text}
+      - Estimasi Biaya Mahar: Rp ${_estimasiMaharController.text}
+      - Estimasi Biaya Seserahan: Rp ${_estimasiSeserahanController.text}
+
+      Berikan analisis terstruktur mengenai:
+      1. Kesiapan Finansial untuk biaya pernikahan (Resepsi+Mahar+Seserahan) dalam waktu $_targetNikahTahun tahun.
+      2. Saran pengelolaan gaji dan tabungan bulanan agar target tercapai.
+      3. Proyeksi Stabilitas Jangka Panjang pasca-nikah (dengan asumsi pengeluaran meningkat).
+      ''';
+
+      final content = [Content.text(prompt)];
+      final response = await model.generateContent(content);
+
+      if (mounted) {
+        _showAnalysisDialog(
+          response.text ?? 'Tidak ada analisis yang dapat diberikan.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Terjadi kesalahan: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
+  }
+
+  void _showAnalysisDialog(String text) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Proyeksi & Analisis Pernikahan'),
+          content: SingleChildScrollView(child: Text(text)),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                widget.onSubmit();
+              },
+              child: const Text('Tutup & Selesai'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Widget _buildCurrencyField(String label, TextEditingController controller) {
@@ -133,13 +210,15 @@ class _BelumMenikahFormState extends State<BelumMenikahForm> {
           ),
 
           const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _submitForm,
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-            child: const Text('Simpan & Analisis Proyeksi'),
-          ),
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : ElevatedButton(
+                  onPressed: _submitForm,
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text('Simpan & Analisis Proyeksi'),
+                ),
         ],
       ),
     );
