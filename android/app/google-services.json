@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "786084899455",
+    "project_id": "unified-cc5c8",
+    "storage_bucket": "unified-cc5c8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:786084899455:android:2f5629b2d76363c6e72d4a",
+        "android_client_info": {
+          "package_name": "com.example.unified"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvLJjiSB17c1FPoR7NBz_3JIOnGLE8jfc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
