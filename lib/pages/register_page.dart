@@ -71,9 +71,7 @@ class _RegisterPageState extends State<RegisterPage> {
             'name': _nameController.text.trim(),
             'email': _emailController.text.trim(),
             'age': age,
-            'maritalStatus': _maritalStatus == 'sudah'
-                ? 'Sudah Menikah'
-                : 'Belum Menikah',
+            'maritalStatus': _maritalStatus,
             'createdAt': FieldValue.serverTimestamp(),
           });
 

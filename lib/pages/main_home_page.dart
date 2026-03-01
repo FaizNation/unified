@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MainHomePage extends StatefulWidget {
   const MainHomePage({super.key});
@@ -21,7 +23,7 @@ class _MainHomePageState extends State<MainHomePage> {
     _loadData();
   }
 
-  void _loadData() async {
+  Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final String? savedDataString = prefs.getString('financialData');
 
@@ -34,6 +36,33 @@ class _MainHomePageState extends State<MainHomePage> {
         _financialData = null;
       }
     });
+
+    // Load user data from Firestore
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (doc.exists && mounted) {
+          final data = doc.data()!;
+          setState(() {
+            _currentUser = data['name'] ?? user.displayName ?? "User";
+          });
+        } else if (mounted) {
+          setState(() {
+            _currentUser = user.email?.split('@')[0] ?? "User";
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _currentUser = user.email?.split('@')[0] ?? "User";
+          });
+        }
+      }
+    }
   }
 
   String _getGreeting() {

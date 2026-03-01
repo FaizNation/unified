@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'login_page.dart';
 
@@ -21,16 +22,39 @@ class _ProfilePageState extends State<ProfilePage> {
     _loadUser();
   }
 
-  void _loadUser() {
-    // Replace with real Firebase Auth/Firestore user data loading
-    setState(() {
-      _currentUser = {
-        'nama': 'Pengguna Unified',
-        'email': FirebaseAuth.instance.currentUser?.email ?? 'user@example.com',
-        'umur': 25,
-        'statusPernikahan': 'belum', // 'belum' atau 'sudah'
-      };
-    });
+  Future<void> _loadUser() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (doc.exists && mounted) {
+          final data = doc.data()!;
+          setState(() {
+            _currentUser = {
+              'nama': data['name'] ?? 'Pengguna Unified',
+              'email': user.email ?? data['email'] ?? 'user@example.com',
+              'umur': data['age'] ?? 0,
+              'statusPernikahan': data['maritalStatus'] ?? 'belum',
+            };
+          });
+        }
+      } catch (e) {
+        // Fallback
+        if (mounted) {
+          setState(() {
+            _currentUser = {
+              'nama': 'Pengguna Unified',
+              'email': user.email ?? 'user@example.com',
+              'umur': 0,
+              'statusPernikahan': 'belum',
+            };
+          });
+        }
+      }
+    }
   }
 
   Future<void> _handleLogout(BuildContext context) async {
