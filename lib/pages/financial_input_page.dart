@@ -98,21 +98,19 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
       return;
     }
 
-    // Remove non-digits
     String cleanString = value.replaceAll(RegExp(r'[^0-9]'), '');
     if (cleanString.isEmpty) return;
 
-    // Format
     int number = int.parse(cleanString);
     String formatted = _currencyFormat.format(number);
 
-    // Update controller without triggering the listener again infinitely
     _controllers[key]!.value = TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 
+  // ALGORITMA 1: Kesiapan Menikah (Fase Pre)
   int _calculateReadinessScore(Map<String, dynamic> data) {
     int score = 0;
     double income = (data['monthlyIncome'] ?? 0) + (data['partnerIncome'] ?? 0);
@@ -126,7 +124,6 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
         (data['otherExpenses'] ?? 0);
     double monthlySavings = income - totalExpenses;
 
-    // Income adequacy (20 points)
     if (income >= 10000000)
       score += 20;
     else if (income >= 7000000)
@@ -136,7 +133,6 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
     else
       score += 5;
 
-    // Savings (25 points)
     double savings = data['savings'] ?? 0;
     if (savings >= 50000000)
       score += 25;
@@ -149,20 +145,17 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
     else
       score += 5;
 
-    // Debt ratio (20 points)
     double debt = data['debt'] ?? 0;
     double debtRatio = income > 0 ? (debt / income) : 100;
     if (debtRatio == 0)
       score += 20;
-    else if (debtRatio < 3)
-      score +=
-          15; // In React logic, this seems to be treating 3 as 300%? Or 3%? Assuming literal translation
-    else if (debtRatio < 6)
+    else if (debtRatio < 0.3)
+      score += 15; // Rasio hutang aman di bawah 30%
+    else if (debtRatio < 0.6)
       score += 10;
     else
       score += 5;
 
-    // Monthly savings capacity (20 points)
     if (monthlySavings >= income * 0.3)
       score += 20;
     else if (monthlySavings >= income * 0.2)
@@ -172,7 +165,6 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
     else
       score += 5;
 
-    // Wedding budget planning (15 points)
     double weddingBudget = data['weddingBudget'] ?? 0;
     int monthsUntilWedding = (data['monthsUntilWedding'] ?? 0).toInt();
 
@@ -189,6 +181,60 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
     }
 
     return min(score, 100);
+  }
+
+  // ALGORITMA 2 (BARU): Kesehatan Finansial Pasca-Nikah (Fase Post)
+  int _calculatePostMarriageHealthScore(Map<String, dynamic> data) {
+    int score = 0;
+    double income = (data['monthlyIncome'] ?? 0) + (data['partnerIncome'] ?? 0);
+    double totalExpenses =
+        (data['rentOrMortgage'] ?? 0) +
+        (data['utilities'] ?? 0) +
+        (data['groceries'] ?? 0) +
+        (data['transportation'] ?? 0) +
+        (data['insurance'] ?? 0) +
+        (data['entertainment'] ?? 0) +
+        (data['otherExpenses'] ?? 0);
+
+    double monthlySavings = income - totalExpenses;
+    double savings = data['savings'] ?? 0;
+    double debt = data['debt'] ?? 0;
+
+    // 1. Dana Darurat (Max 30 Poin) - Ideal minimal 6x pengeluaran bulanan
+    double targetDanaDarurat = totalExpenses * 6;
+    if (targetDanaDarurat > 0) {
+      if (savings >= targetDanaDarurat)
+        score += 30; // Sangat aman (6+ bulan tercover)
+      else if (savings >= totalExpenses * 3)
+        score += 20; // Cukup (3-5 bulan tercover)
+      else if (savings >= totalExpenses * 1)
+        score += 10; // Bahaya (Hanya 1-2 bulan)
+    } else if (savings > 0) {
+      score +=
+          30; // Jika tidak ada pengeluaran (jarang terjadi) namun punya tabungan
+    }
+
+    // 2. Kapasitas Menabung Bulanan (Max 30 Poin)
+    double savingsRate = income > 0 ? (monthlySavings / income) : 0;
+    if (savingsRate >= 0.20)
+      score += 30; // Sehat (Bisa nabung >= 20%)
+    else if (savingsRate >= 0.10)
+      score += 20; // Cukup (Nabung >= 10%)
+    else if (savingsRate > 0)
+      score += 10; // Bahaya (Nabung di bawah 10%)
+
+    // 3. Rasio Beban Hutang DTI (Max 40 Poin)
+    double debtRatio = income > 0 ? (debt / income) : (debt > 0 ? 1 : 0);
+    if (debtRatio == 0)
+      score += 40; // Bebas hutang
+    else if (debtRatio <= 0.30)
+      score += 30; // Hutang sehat KPR/Cicilan (di bawah 30% gaji)
+    else if (debtRatio <= 0.40)
+      score += 15; // Warning KPR mepet
+    else
+      score += 0; // Terlilit hutang (Beban cicilan di atas 40%)
+
+    return score.clamp(0, 100);
   }
 
   void _handleSubmit() async {
@@ -218,12 +264,13 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
     if (_phase == "pre") {
       final score = _calculateReadinessScore(dataToSave);
       await prefs.setString('readinessScore', score.toString());
-      // React navigated to /pre-marriage, we'll navigate to home and it will select pre-marriage view
-      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
-    } else {
-      // React navigated to /post-marriage, we'll navigate to home
-      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+    } else if (_phase == "post") {
+      // SIMPAN SKOR KESEHATAN FINANSIAL PASCA-NIKAH KE LOKAL
+      final healthScore = _calculatePostMarriageHealthScore(dataToSave);
+      await prefs.setString('postMarriageScore', healthScore.toString());
     }
+
+    Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
   }
 
   Widget _buildSectionHeader({
@@ -379,7 +426,7 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
             Text(
               'Isi informasi keuangan Anda',
               style: TextStyle(color: Color(0xFFFCE7F3), fontSize: 14),
-            ), // pink-100
+            ),
           ],
         ),
         elevation: 4,
@@ -419,21 +466,21 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
               title: 'Aset & Tabungan',
             ),
             _buildInputField(
-              title: 'Total Tabungan',
+              title: 'Total Tabungan Saat Ini',
               icon: Icons.account_balance_wallet,
               iconColor: Colors.blue.shade600,
               iconBgColor: Colors.blue.shade100,
               key: 'savings',
             ),
             _buildInputField(
-              title: 'Total Aset',
+              title: 'Total Nilai Aset',
               icon: Icons.home,
               iconColor: Colors.purple.shade600,
               iconBgColor: Colors.purple.shade100,
               key: 'assets',
             ),
             _buildInputField(
-              title: 'Total Hutang',
+              title: 'Cicilan/Hutang Bulanan',
               icon: Icons.credit_card,
               iconColor: Colors.red.shade600,
               iconBgColor: Colors.red.shade100,
@@ -507,8 +554,7 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
               ),
               _buildInputField(
                 title: 'Estimasi Budget Pernikahan',
-                icon: Icons
-                    .attach_money, // Dummy icon for the form view since no icon was explicitly mapped in React beside the header
+                icon: Icons.attach_money,
                 iconColor: Colors.purple.shade600,
                 iconBgColor: Colors.purple.shade50,
                 key: 'weddingBudget',
@@ -539,17 +585,16 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
                 child: Ink(
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFEC4899),
-                        Color(0xFF9333EA),
-                      ], // pink-500 setup to purple-600
+                      colors: [Color(0xFFEC4899), Color(0xFF9333EA)],
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
-                      'Analisis Keuangan Saya',
-                      style: TextStyle(
+                      _phase == 'pre'
+                          ? 'Analisis Kesiapan Menikah'
+                          : 'Analisis Kesehatan Finansial',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,

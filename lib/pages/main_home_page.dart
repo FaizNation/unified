@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -24,32 +25,41 @@ class _MainHomePageState extends State<MainHomePage> {
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // Load local phase preference
+    final String? savedDataString = prefs.getString('financialData');
+
     setState(() {
       _phase = prefs.getString('phase');
+      // Load data keuangan asli dari input user
+      if (savedDataString != null) {
+        _financialData = jsonDecode(savedDataString);
+      } else {
+        _financialData = null;
+      }
     });
 
     // Load user data from Firestore
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       try {
-        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
         if (doc.exists && mounted) {
           final data = doc.data()!;
           setState(() {
             _currentUser = data['name'] ?? user.displayName ?? "User";
           });
         } else if (mounted) {
-           setState(() {
-             _currentUser = user.email?.split('@')[0] ?? "User";
-           });
+          setState(() {
+            _currentUser = user.email?.split('@')[0] ?? "User";
+          });
         }
       } catch (e) {
         if (mounted) {
-           setState(() {
-             _currentUser = user.email?.split('@')[0] ?? "User";
-           });
+          setState(() {
+            _currentUser = user.email?.split('@')[0] ?? "User";
+          });
         }
       }
     }
@@ -65,7 +75,7 @@ class _MainHomePageState extends State<MainHomePage> {
   void _handleInputKeuangan() async {
     // Navigate to financial input
     await Navigator.pushNamed(context, '/financial-input');
-    _loadData();
+    _loadData(); // Reload data setelah user selesai input
   }
 
   void _handleSetupPhase() async {
@@ -82,11 +92,39 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
+  // Helper untuk menghitung total pengeluaran
+  double _calculateMonthlyExpenses() {
+    if (_financialData == null) return 0;
+    return (_financialData!['rentOrMortgage'] ?? 0) * 1.0 +
+        (_financialData!['utilities'] ?? 0) * 1.0 +
+        (_financialData!['groceries'] ?? 0) * 1.0 +
+        (_financialData!['transportation'] ?? 0) * 1.0 +
+        (_financialData!['insurance'] ?? 0) * 1.0 +
+        (_financialData!['entertainment'] ?? 0) * 1.0 +
+        (_financialData!['otherExpenses'] ?? 0) * 1.0;
+  }
+
+  // Helper untuk menghitung total pendapatan
+  double _calculateTotalIncome() {
+    if (_financialData == null) return 0;
+    return (_financialData!['monthlyIncome'] ?? 0) * 1.0 +
+        (_financialData!['partnerIncome'] ?? 0) * 1.0;
+  }
+
+  // Helper untuk memformat angka menjadi format Rupiah yang rapi
+  String _formatCurrency(num amount) {
+    return amount
+        .toStringAsFixed(0)
+        .replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => '${m[1]}.',
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors
-          .transparent, // Background set from parent HomePage if needed, otherwise white
+      backgroundColor: Colors.transparent,
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -413,18 +451,18 @@ class _MainHomePageState extends State<MainHomePage> {
                                     ),
                                     const SizedBox(height: 16),
                                     _buildFinancialRow(
-                                      'Pendapatan Bulanan',
-                                      'Rp ${((_financialData?['monthlyIncome'] ?? 0) + (_financialData?['partnerIncome'] ?? 0)).toString()}',
+                                      'Total Pendapatan',
+                                      'Rp ${_formatCurrency(_calculateTotalIncome())}',
                                     ),
                                     const SizedBox(height: 8),
                                     _buildFinancialRow(
-                                      'Tabungan',
-                                      'Rp ${(_financialData?['savings'] ?? 0).toString()}',
+                                      'Total Tabungan',
+                                      'Rp ${_formatCurrency(_financialData!['savings'] ?? 0)}',
                                     ),
                                     const SizedBox(height: 8),
                                     _buildFinancialRow(
                                       'Pengeluaran Bulanan',
-                                      'Rp ${((_financialData?['rentOrMortgage'] ?? 0) + (_financialData?['otherExpenses'] ?? 0)).toString()}', // Simplified for demo
+                                      'Rp ${_formatCurrency(_calculateMonthlyExpenses())}',
                                     ),
                                   ],
                                 ),

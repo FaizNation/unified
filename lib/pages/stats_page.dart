@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,25 +10,10 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  // Mock data for initial rendering
-  Map<String, dynamic>? _financialData = {
-    'monthlyIncome': 10000000,
-    'partnerIncome': 8000000,
-    'savings': 50000000,
-    'rentOrMortgage': 4000000,
-    'utilities': 500000,
-    'groceries': 2000000,
-    'transportation': 1500000,
-    'insurance': 500000,
-    'entertainment': 1000000,
-    'otherExpenses': 500000,
-    'assets': 100000000,
-    'debt': 10000000,
-    'weddingBudget': 150000000,
-    'monthsUntilWedding': 12,
-  };
+  Map<String, dynamic>? _financialData;
   String? _phase;
-  int _score = 85;
+  int _score = 0; // Pre-marriage score
+  int _postScore = 0; // Post-marriage health score
 
   @override
   void initState() {
@@ -37,54 +23,79 @@ class _StatsPageState extends State<StatsPage> {
 
   void _loadData() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedDataString = prefs.getString('financialData');
+    final savedPreScoreString = prefs.getString('readinessScore');
+    final savedPostScoreString = prefs.getString('postMarriageScore');
+
     setState(() {
       _phase = prefs.getString('phase');
+
+      // Load financial data
+      if (savedDataString != null) {
+        _financialData = jsonDecode(savedDataString);
+      }
+
+      // Load readiness score for pre-marriage phase
+      if (savedPreScoreString != null) {
+        _score = int.tryParse(savedPreScoreString) ?? 0;
+      }
+
+      // Load health score for post-marriage phase
+      if (savedPostScoreString != null) {
+        _postScore = int.tryParse(savedPostScoreString) ?? 0;
+      }
     });
   }
 
-  int _calculateMonthlyExpenses() {
-    if (_financialData == null) return 0;
-    return (_financialData!['rentOrMortgage'] ?? 0) +
-        (_financialData!['utilities'] ?? 0) +
-        (_financialData!['groceries'] ?? 0) +
-        (_financialData!['transportation'] ?? 0) +
-        (_financialData!['insurance'] ?? 0) +
-        (_financialData!['entertainment'] ?? 0) +
-        (_financialData!['otherExpenses'] ?? 0);
+  double _getDouble(String key) {
+    if (_financialData == null) return 0.0;
+    final val = _financialData![key];
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0;
   }
 
-  int _calculateTotalIncome() {
-    if (_financialData == null) return 0;
-    return (_financialData!['monthlyIncome'] ?? 0) +
-        (_financialData!['partnerIncome'] ?? 0);
+  double _calculateMonthlyExpenses() {
+    return _getDouble('rentOrMortgage') +
+        _getDouble('utilities') +
+        _getDouble('groceries') +
+        _getDouble('transportation') +
+        _getDouble('insurance') +
+        _getDouble('entertainment') +
+        _getDouble('otherExpenses');
+  }
+
+  double _calculateTotalIncome() {
+    return _getDouble('monthlyIncome') + _getDouble('partnerIncome');
   }
 
   int _calculateSavingsRate() {
     final income = _calculateTotalIncome();
     final expenses = _calculateMonthlyExpenses();
-    if (income == 0) return 0;
+    if (income <= 0) return 0;
     return (((income - expenses) / income) * 100).round();
   }
 
-  int _calculateMonthlySavingsCapacity() {
+  double _calculateMonthlySavingsCapacity() {
     final income = _calculateTotalIncome();
     final expenses = _calculateMonthlyExpenses();
     return income - expenses;
   }
 
-  String _formatCurrency(int amount) {
-    // Basic currency formatter for demo, replace with intl package normally
-    return amount.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]}.',
-    );
+  String _formatCurrency(num amount) {
+    return amount
+        .toStringAsFixed(0)
+        .replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => '${m[1]}.',
+        );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          Colors.transparent, // Inherited from common background if needed
+      backgroundColor: Colors.transparent,
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -125,11 +136,8 @@ class _StatsPageState extends State<StatsPage> {
                       ),
                       SizedBox(height: 4),
                       Text(
-                        'Ringkasan keuangan Anda',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.black54, // gray-600 approx
-                        ),
+                        'Ringkasan kesehatan keuangan keluarga Anda',
+                        style: TextStyle(fontSize: 16, color: Colors.black54),
                       ),
                     ],
                   ),
@@ -176,7 +184,7 @@ class _StatsPageState extends State<StatsPage> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Score Card (for pre-marriage)
+                      // UI CARD: PRE-MARRIAGE SCORE
                       if (_phase == "pre" && _score > 0)
                         Card(
                           elevation: 0,
@@ -220,7 +228,7 @@ class _StatsPageState extends State<StatsPage> {
                                         'dari 100',
                                         style: TextStyle(
                                           color: Color(0xFFF3E8FF),
-                                        ), // purple-100
+                                        ),
                                       ),
                                       const SizedBox(height: 16),
                                       Container(
@@ -250,7 +258,97 @@ class _StatsPageState extends State<StatsPage> {
                           ),
                         ),
 
-                      if (_phase == "pre" && _score > 0)
+                      // UI CARD BARU: POST-MARRIAGE HEALTH SCORE (KELAYAKAN HIDUP PASCA-NIKAH)
+                      if (_phase == "post" && _postScore > 0)
+                        Card(
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Color(0xFF6366F1),
+                                  Color(0xFF8B5CF6),
+                                ], // Indigo to Purple
+                              ),
+                            ),
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text(
+                                      'Kesehatan Keuangan Keluarga',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.health_and_safety,
+                                      color: Colors.white,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                Center(
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        '$_postScore',
+                                        style: const TextStyle(
+                                          fontSize: 48,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const Text(
+                                        'Indeks Kesehatan',
+                                        style: TextStyle(
+                                          color: Color(0xFFE0E7FF),
+                                        ), // indigo-100
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Container(
+                                        width: double.infinity,
+                                        height: 1,
+                                        color: Colors.white.withOpacity(0.2),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        _postScore >= 80
+                                            ? "🌟 Sangat Sehat (Ideal)"
+                                            : _postScore >= 60
+                                            ? "✅ Cukup Sehat (Amankan Dana Darurat)"
+                                            : _postScore >= 40
+                                            ? "⚠️ Rentan (Kurangi Beban Hutang)"
+                                            : "🚨 Kritis (Fokus Lunasi Hutang & Tekan Pengeluaran)",
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                      if ((_phase == "pre" && _score > 0) ||
+                          (_phase == "post" && _postScore > 0))
                         const SizedBox(height: 16),
 
                       // Stats Grid
@@ -273,7 +371,7 @@ class _StatsPageState extends State<StatsPage> {
                           _buildStatGridItem(
                             title: 'Total Tabungan',
                             value:
-                                'Rp ${_formatCurrency(_financialData!['savings'] ?? 0)}',
+                                'Rp ${_formatCurrency(_getDouble('savings'))}',
                             icon: Icons.savings_outlined,
                             iconColor: Colors.blue.shade600,
                             iconBgColor: Colors.blue.shade100,
@@ -336,14 +434,13 @@ class _StatsPageState extends State<StatsPage> {
                           children: [
                             _buildInfoRow(
                               'Pendapatan Anda',
-                              'Rp ${_formatCurrency(_financialData!['monthlyIncome'] ?? 0)}',
+                              'Rp ${_formatCurrency(_getDouble('monthlyIncome'))}',
                             ),
-                            if ((_financialData!['partnerIncome'] ?? 0) >
-                                0) ...[
+                            if (_getDouble('partnerIncome') > 0) ...[
                               const SizedBox(height: 12),
                               _buildInfoRow(
                                 'Pendapatan Pasangan',
-                                'Rp ${_formatCurrency(_financialData!['partnerIncome'] ?? 0)}',
+                                'Rp ${_formatCurrency(_getDouble('partnerIncome'))}',
                               ),
                             ],
                             const SizedBox(height: 12),
@@ -365,54 +462,54 @@ class _StatsPageState extends State<StatsPage> {
                         title: 'Rincian Pengeluaran',
                         child: Column(
                           children: [
-                            if ((_financialData!['rentOrMortgage'] ?? 0) > 0)
+                            if (_getDouble('rentOrMortgage') > 0)
                               _buildIconInfoRow(
                                 'Sewa/KPR',
                                 Icons.home_outlined,
                                 Colors.orange.shade600,
-                                'Rp ${_formatCurrency(_financialData!['rentOrMortgage'])}',
+                                'Rp ${_formatCurrency(_getDouble('rentOrMortgage'))}',
                               ),
-                            if ((_financialData!['utilities'] ?? 0) > 0)
+                            if (_getDouble('utilities') > 0)
                               _buildIconInfoRow(
                                 'Utilitas',
                                 Icons.bolt,
                                 Colors.yellow.shade700,
-                                'Rp ${_formatCurrency(_financialData!['utilities'])}',
+                                'Rp ${_formatCurrency(_getDouble('utilities'))}',
                               ),
-                            if ((_financialData!['groceries'] ?? 0) > 0)
+                            if (_getDouble('groceries') > 0)
                               _buildIconInfoRow(
                                 'Belanja',
                                 Icons.shopping_cart_outlined,
                                 Colors.green.shade600,
-                                'Rp ${_formatCurrency(_financialData!['groceries'])}',
+                                'Rp ${_formatCurrency(_getDouble('groceries'))}',
                               ),
-                            if ((_financialData!['transportation'] ?? 0) > 0)
+                            if (_getDouble('transportation') > 0)
                               _buildIconInfoRow(
                                 'Transportasi',
                                 Icons.directions_car_outlined,
                                 Colors.blue.shade600,
-                                'Rp ${_formatCurrency(_financialData!['transportation'])}',
+                                'Rp ${_formatCurrency(_getDouble('transportation'))}',
                               ),
-                            if ((_financialData!['insurance'] ?? 0) > 0)
+                            if (_getDouble('insurance') > 0)
                               _buildIconInfoRow(
                                 'Asuransi',
                                 Icons.shield_outlined,
                                 Colors.indigo.shade600,
-                                'Rp ${_formatCurrency(_financialData!['insurance'])}',
+                                'Rp ${_formatCurrency(_getDouble('insurance'))}',
                               ),
-                            if ((_financialData!['entertainment'] ?? 0) > 0)
+                            if (_getDouble('entertainment') > 0)
                               _buildIconInfoRow(
                                 'Hiburan',
                                 Icons.sports_esports_outlined,
                                 Colors.pink.shade600,
-                                'Rp ${_formatCurrency(_financialData!['entertainment'])}',
+                                'Rp ${_formatCurrency(_getDouble('entertainment'))}',
                               ),
-                            if ((_financialData!['otherExpenses'] ?? 0) > 0)
+                            if (_getDouble('otherExpenses') > 0)
                               _buildIconInfoRow(
                                 'Lainnya',
                                 Icons.account_balance_wallet_outlined,
                                 Colors.grey.shade600,
-                                'Rp ${_formatCurrency(_financialData!['otherExpenses'])}',
+                                'Rp ${_formatCurrency(_getDouble('otherExpenses'))}',
                               ),
 
                             const SizedBox(height: 8),
@@ -430,7 +527,7 @@ class _StatsPageState extends State<StatsPage> {
                       const SizedBox(height: 16),
 
                       // Assets & Debts
-                      if ((_financialData!['assets'] ?? 0) > 0)
+                      if (_getDouble('assets') > 0)
                         _buildSummaryCard(
                           title: 'Total Aset',
                           titleColor: Colors.blue.shade600,
@@ -444,7 +541,7 @@ class _StatsPageState extends State<StatsPage> {
                                 style: TextStyle(color: Colors.grey.shade600),
                               ),
                               Text(
-                                'Rp ${_formatCurrency(_financialData!['assets'])}',
+                                'Rp ${_formatCurrency(_getDouble('assets'))}',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
@@ -455,7 +552,7 @@ class _StatsPageState extends State<StatsPage> {
                           ),
                         ),
 
-                      if ((_financialData!['debt'] ?? 0) > 0) ...[
+                      if (_getDouble('debt') > 0) ...[
                         const SizedBox(height: 12),
                         _buildSummaryCard(
                           title: 'Total Hutang',
@@ -470,98 +567,13 @@ class _StatsPageState extends State<StatsPage> {
                                 style: TextStyle(color: Colors.grey.shade600),
                               ),
                               Text(
-                                'Rp ${_formatCurrency(_financialData!['debt'])}',
+                                'Rp ${_formatCurrency(_getDouble('debt'))}',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.red.shade600,
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                      ],
-
-                      // Wedding Planning (for pre-marriage)
-                      if (_phase == "pre" &&
-                          (_financialData!['weddingBudget'] ?? 0) > 0) ...[
-                        const SizedBox(height: 16),
-                        _buildSummaryCard(
-                          title: 'Rencana Pernikahan',
-                          titleColor: const Color(0xFF7E22CE), // purple-700
-                          borderColor: Colors.pink.shade200,
-                          backgroundColor: const Color(
-                            0xFFFDF2F8,
-                          ), // pink-50 approx blending
-                          child: Column(
-                            children: [
-                              _buildInfoRow(
-                                'Target Budget',
-                                'Rp ${_formatCurrency(_financialData!['weddingBudget'])}',
-                              ),
-                              if ((_financialData!['monthsUntilWedding'] ?? 0) >
-                                  0) ...[
-                                const SizedBox(height: 12),
-                                _buildInfoRow(
-                                  'Waktu Tersisa',
-                                  '${_financialData!['monthsUntilWedding']} bulan',
-                                ),
-                                const SizedBox(height: 12),
-                                const Divider(),
-                                const SizedBox(height: 8),
-                                _buildInfoRow(
-                                  'Harus Ditabung/Bulan',
-                                  'Rp ${_formatCurrency((_financialData!['weddingBudget'] / _financialData!['monthsUntilWedding']).ceil())}',
-                                  isTotal: true,
-                                  valueColor: const Color(0xFF9333EA),
-                                ),
-                                if (_calculateMonthlySavingsCapacity() >=
-                                    0) ...[
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Status Kemampuan',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey.shade600,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        if (_calculateMonthlySavingsCapacity() >=
-                                            (_financialData!['weddingBudget'] /
-                                                _financialData!['monthsUntilWedding']))
-                                          Text(
-                                            '✅ Anda mampu menabung untuk target ini!',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                              color: Colors.green.shade600,
-                                            ),
-                                          )
-                                        else
-                                          Text(
-                                            '⚠️ Perlu tambahan Rp ${_formatCurrency(((_financialData!['weddingBudget'] / _financialData!['monthsUntilWedding']) - _calculateMonthlySavingsCapacity()).ceil())} per bulan',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                              color: Colors.orange.shade600,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ],
                             ],
                           ),
                         ),
