@@ -55,6 +55,18 @@ class _MainHomePageState extends State<MainHomePage> {
             _currentUser = user.email?.split('@')[0] ?? "User";
           });
         }
+
+        final financialDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('financial_data')
+            .doc('current')
+            .get();
+        if (financialDoc.exists && mounted) {
+          setState(() {
+            _financialData = financialDoc.data();
+          });
+        }
       } catch (e) {
         if (mounted) {
           setState(() {

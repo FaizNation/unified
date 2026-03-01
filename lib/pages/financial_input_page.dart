@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FinancialInputPage extends StatefulWidget {
   const FinancialInputPage({super.key});
@@ -65,10 +67,37 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
       _phase = savedPhase ?? "";
     });
 
-    final savedDataString = prefs.getString('financialData');
-    if (savedDataString != null) {
-      final Map<String, dynamic> savedData = jsonDecode(savedDataString);
+    final user = FirebaseAuth.instance.currentUser;
+    Map<String, dynamic>? savedData;
 
+    try {
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('financial_data')
+            .doc('current')
+            .get();
+        if (doc.exists) {
+          savedData = doc.data()!;
+        }
+      }
+    } catch (e) {
+      // Fallback to local storage if Firestore fails
+      final savedDataString = prefs.getString('financialData');
+      if (savedDataString != null) {
+        savedData = jsonDecode(savedDataString);
+      }
+    }
+
+    if (savedData == null) {
+      final savedDataString = prefs.getString('financialData');
+      if (savedDataString != null) {
+        savedData = jsonDecode(savedDataString);
+      }
+    }
+
+    if (savedData != null) {
       savedData.forEach((key, value) {
         if (_controllers.containsKey(key)) {
           if (value != null && value.toString().isNotEmpty && value != 0) {
@@ -259,16 +288,37 @@ class _FinancialInputPageState extends State<FinancialInputPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('financialData', jsonEncode(dataToSave));
 
-    if (!mounted) return;
+    int score = 0;
+    int healthScore = 0;
 
     if (_phase == "pre") {
-      final score = _calculateReadinessScore(dataToSave);
+      score = _calculateReadinessScore(dataToSave);
       await prefs.setString('readinessScore', score.toString());
     } else if (_phase == "post") {
-      // SIMPAN SKOR KESEHATAN FINANSIAL PASCA-NIKAH KE LOKAL
-      final healthScore = _calculatePostMarriageHealthScore(dataToSave);
+      healthScore = _calculatePostMarriageHealthScore(dataToSave);
       await prefs.setString('postMarriageScore', healthScore.toString());
     }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('financial_data')
+            .doc('current')
+            .set({
+              ...dataToSave,
+              if (_phase == "pre") 'readinessScore': score,
+              if (_phase == "post") 'postMarriageScore': healthScore,
+              'updatedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint("Error saving to Firestore: $e");
+      }
+    }
+
+    if (!mounted) return;
 
     Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
   }

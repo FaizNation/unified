@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class BudgetCategory {
   final String name;
@@ -65,6 +67,10 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
   List<Transaction> _transactions = [];
   bool _showAddTransaction = false;
 
+  // Spouse Linking
+  String? _familyId;
+  String? _spouseEmail;
+
   // Form State
   String _selectedCategory = "";
   final TextEditingController _amountController = TextEditingController();
@@ -93,7 +99,82 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
     final prefs = await SharedPreferences.getInstance();
     final savedDataString = prefs.getString('financialData');
 
-    if (savedDataString == null && mounted) {
+    Map<String, dynamic>? financialData;
+
+    // First try Firestore
+    final user = FirebaseAuth.instance.currentUser;
+    String targetUid = user?.uid ?? "";
+
+    if (user != null) {
+      try {
+        // 1. Get User Profile to check for Family ID
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          if (userData.containsKey('familyId') &&
+              userData['familyId'] != null) {
+            targetUid = userData['familyId'];
+          }
+          if (userData.containsKey('spouseEmail')) {
+            _spouseEmail = userData['spouseEmail'];
+          }
+        }
+
+        setState(() {
+          _familyId = targetUid;
+        });
+
+        // 2. Fetch Financial Data using targetUid (Family ID or own UID)
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(targetUid)
+            .collection('financial_data')
+            .doc('current')
+            .get();
+        if (doc.exists) {
+          financialData = doc.data()!;
+        }
+
+        // 3. Fetch Transactions using targetUid
+        final transSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(targetUid)
+            .collection('transactions')
+            .orderBy('date', descending: true)
+            .get();
+
+        if (transSnapshot.docs.isNotEmpty) {
+          setState(() {
+            _transactions = transSnapshot.docs
+                .map((d) => Transaction.fromJson(d.data()))
+                .toList();
+          });
+        } else {
+          // Fallback to local transactions if Firestore is empty
+          final savedTransactionsString = prefs.getString('transactions');
+          if (savedTransactionsString != null) {
+            final List<dynamic> decoded = jsonDecode(savedTransactionsString);
+            setState(() {
+              _transactions = decoded
+                  .map((e) => Transaction.fromJson(e))
+                  .toList();
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint("Error loading from Firestore: $e");
+      }
+    }
+
+    // Fallback to local financial data
+    if (financialData == null && savedDataString != null) {
+      financialData = jsonDecode(savedDataString);
+    }
+
+    if (financialData == null && mounted) {
       Navigator.pushReplacementNamed(
         context,
         '/',
@@ -101,18 +182,9 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
       return;
     }
 
-    if (savedDataString != null) {
+    if (financialData != null && mounted) {
       setState(() {
-        _financialData = jsonDecode(savedDataString);
-      });
-    }
-
-    // Load saved transactions
-    final savedTransactionsString = prefs.getString('transactions');
-    if (savedTransactionsString != null) {
-      final List<dynamic> decoded = jsonDecode(savedTransactionsString);
-      setState(() {
-        _transactions = decoded.map((e) => Transaction.fromJson(e)).toList();
+        _financialData = financialData;
       });
     }
 
@@ -253,14 +325,29 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
       _descController.clear();
       _showAddTransaction = false;
     });
+    
+    _calculateBudget();
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final targetUid = _familyId ?? user.uid;
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(targetUid)
+            .collection('transactions')
+            .doc(transaction.id)
+            .set(transaction.toJson());
+      } catch (e) {
+        debugPrint("Error saving transaction to Firestore: $e");
+      }
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       'transactions',
       jsonEncode(_transactions.map((e) => e.toJson()).toList()),
     );
-
-    _calculateBudget();
   }
 
   Future<void> _handleDeleteTransaction(String id) async {
@@ -268,13 +355,28 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
       _transactions.removeWhere((t) => t.id == id);
     });
 
+    _calculateBudget();
+    
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final targetUid = _familyId ?? user.uid;
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(targetUid)
+            .collection('transactions')
+            .doc(id)
+            .delete();
+      } catch (e) {
+        debugPrint("Error deleting transaction from Firestore: $e");
+      }
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       'transactions',
       jsonEncode(_transactions.map((e) => e.toJson()).toList()),
     );
-
-    _calculateBudget();
   }
 
   void _onCurrencyInputChanged(String value) {
@@ -367,6 +469,107 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
                 padding: const EdgeInsets.all(16.0),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
+                    // Spouse Linking Card
+                    if (_spouseEmail == null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.pink.shade200),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.pink.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.pink.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                Icons.favorite,
+                                color: Colors.pink.shade400,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Hubungkan Akun Pasangan',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Kelola keuangan bersama-sama secara sinkron.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _showLinkSpouseDialog,
+                              style: TextButton.styleFrom(
+                                backgroundColor: Colors.pink.shade50,
+                                foregroundColor: Colors.pink.shade700,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: const Text('Hubungkan'),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.green.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.link,
+                              color: Colors.green.shade600,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Terhubung dengan: $_spouseEmail',
+                                style: TextStyle(
+                                  color: Colors.green.shade800,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
                     // Budget Model Selector
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -913,6 +1116,160 @@ class _PostMarriagePageState extends State<PostMarriagePage> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _showLinkSpouseDialog() async {
+    final TextEditingController emailController = TextEditingController();
+    bool isLoading = false;
+    String? errorMessage;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Hubungkan Akun Pasangan'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Masukkan email akun pasangan Anda yang sudah terdaftar di aplikasi.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailController,
+                    decoration: InputDecoration(
+                      labelText: 'Email Pasangan',
+                      hintText: 'contoh@email.com',
+                      errorText: errorMessage,
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isLoading ? null : () => Navigator.pop(context),
+                  child: const Text(
+                    'Batal',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                          final email = emailController.text.trim();
+                          if (email.isEmpty) {
+                            setState(
+                              () => errorMessage = "Email tidak boleh kosong",
+                            );
+                            return;
+                          }
+
+                          setState(() {
+                            isLoading = true;
+                            errorMessage = null;
+                          });
+
+                          try {
+                            final currentUser =
+                                FirebaseAuth.instance.currentUser;
+                            if (currentUser == null)
+                              throw Exception("Harap login kembali.");
+                            if (email == currentUser.email) {
+                              throw Exception(
+                                "Tidak bisa menghubungkan ke email diri sendiri.",
+                              );
+                            }
+
+                            final usersRef = FirebaseFirestore.instance
+                                .collection('users');
+                            final query = await usersRef
+                                .where('email', isEqualTo: email)
+                                .limit(1)
+                                .get();
+
+                            if (query.docs.isEmpty) {
+                              setState(() {
+                                errorMessage =
+                                    "Pengguna dengan email ini tidak ditemukan.";
+                                isLoading = false;
+                              });
+                              return;
+                            }
+
+                            final targetUserDoc = query.docs.first;
+                            final targetUid = targetUserDoc.id;
+
+                            // Connect: targetUid becomes the familyId
+                            final batch = FirebaseFirestore.instance.batch();
+
+                            // 1. Update Current User
+                            batch.set(
+                              usersRef.doc(currentUser.uid),
+                              {'familyId': targetUid, 'spouseEmail': email},
+                              SetOptions(merge: true),
+                            );
+
+                            // 2. Update Target Spouse User
+                            batch.set(usersRef.doc(targetUid), {
+                              'familyId': targetUid,
+                              'spouseEmail': currentUser.email,
+                            }, SetOptions(merge: true));
+
+                            await batch.commit();
+
+                            if (mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Berhasil menghubungkan akun!'),
+                                ),
+                              );
+                              // Refresh data
+                              _loadData();
+                            }
+                          } catch (e) {
+                            setState(() {
+                              errorMessage = e.toString().replaceAll(
+                                "Exception: ",
+                                "",
+                              );
+                              isLoading = false;
+                            });
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.pink.shade500,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('Hubungkan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

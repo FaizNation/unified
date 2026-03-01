@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PreMarriagePage extends StatefulWidget {
   const PreMarriagePage({super.key});
@@ -35,13 +37,37 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     final prefs = await SharedPreferences.getInstance();
     final savedDataString = prefs.getString('financialData');
 
-    if (savedDataString == null && mounted) {
+    Map<String, dynamic>? financialData;
+
+    // First try Firestore
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('financial_data')
+            .doc('current')
+            .get();
+        if (doc.exists) {
+          financialData = doc.data()!;
+        }
+      } catch (e) {
+        debugPrint("Error loading from Firestore: $e");
+      }
+    }
+
+    // Fallback to local storage
+    if (financialData == null && savedDataString != null) {
+      financialData = jsonDecode(savedDataString);
+    }
+
+    if (financialData == null && mounted) {
       Navigator.pushReplacementNamed(context, '/');
       return;
     }
 
-    if (savedDataString != null) {
-      final financialData = jsonDecode(savedDataString);
+    if (financialData != null && mounted) {
       setState(() {
         _financialData = financialData;
       });
@@ -72,8 +98,9 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
         _parseDouble(data['otherExpenses']);
 
     final currentSavings = _parseDouble(data['savings']);
-    final assets = _parseDouble(data['assets']);
-    final startingWealth = currentSavings + assets;
+    // Untuk biaya pernikahan, kita asumsikan hanya tabungan cair (currentSavings) yang digunakan,
+    // bukan mencairkan aset (rumah/mobil).
+    final startingWealth = currentSavings;
     final debt = _parseDouble(data['debt']);
     final weddingBudget = _parseDouble(data['weddingBudget']);
 
@@ -221,81 +248,80 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
         _parseDouble(_financialData!['monthlyIncome']) +
         _parseDouble(_financialData!['partnerIncome']);
     double currentSavings = _parseDouble(_financialData!['savings']);
-    double assets = _parseDouble(_financialData!['assets']);
-    double startingWealth = currentSavings + assets;
+    // Sama seperti logika di _calculateMetrics, kita hanya hitung tabungan lancar
+    double startingWealth = currentSavings;
     double weddingBudget = _parseDouble(_financialData!['weddingBudget']);
-    int monthsUntilWedding = _parseDouble(
-      _financialData!['monthsUntilWedding'],
-      defaultValue: 12,
-    ).toInt();
-
-    // 1. Rekomendasi Hijau (Sukses)
+    // 1. Rekomendasi Kesehatan Finansial Umum
     if (_status == "green") {
       recommendations.add(
         _buildRecommendationItem(
           icon: Icons.check_circle,
           color: Colors.green.shade600,
           text:
-              'Keuangan Anda sudah siap untuk menikah! Pertahankan pola tabungan yang baik.',
+              'Kondisi finansial Anda secara umum sehat! Pertahankan rasio hutang dan tabungan Anda.',
         ),
       );
     }
 
-    // 2. Logika Target Budget Pernikahan
-    double gapAtWedding = weddingBudget - _totalSavingsByWedding;
+    // 2. Estimasi Waktu Pernikahan
+    double gapFromNow = weddingBudget - startingWealth;
 
-    if (gapAtWedding > 0) {
-      // Jika target dana TIDAK TERCAPAI pada bulan pernikahan
+    if (gapFromNow <= 0) {
+      // Uang sudah cukup bahkan tanpa perlu menabung lagi
+      recommendations.add(
+        _buildRecommendationItem(
+          icon: Icons.celebration,
+          color: Colors.green.shade600,
+          text: 'Dana saat ini sudah sepenuhnya mencukupi budget pernikahan. Anda siap dan dapat melangsungkan pernikahan kapan saja!',
+        ),
+      );
+    } else {
+      // Masih butuh menabung
       if (_monthlySavings > 0) {
-        // Jika nabung positif, hitung butuh tambahan berapa bulan lagi
-        int extraMonths = (gapAtWedding / _monthlySavings).ceil();
-        recommendations.add(
-          _buildRecommendationItem(
-            icon: Icons.calendar_today,
-            color: Colors.purple.shade600,
-            text:
-                'Dana belum mencukupi target. Anda perlu menunda pernikahan sekitar ${_formatDuration(extraMonths)} lagi, atau kurangi budget pernikahan Anda.',
-          ),
-        );
-      } else {
-        // Jika minus/defisit (TIDAK BISA NABUNG)
-        double simulatedSavings =
-            income * 0.2; // Simulasi jika dia dipaksa nabung 20%
-
-        if (simulatedSavings > 0) {
-          double gapFromNow = weddingBudget - startingWealth;
-          if (gapFromNow > 0) {
-            int totalMonthsNeeded = (gapFromNow / simulatedSavings).ceil();
-            int extraMonths = totalMonthsNeeded - monthsUntilWedding;
-
-            if (extraMonths > 0) {
-              recommendations.add(
-                _buildRecommendationItem(
-                  icon: Icons.calendar_today,
-                  color: Colors.purple.shade600,
-                  text:
-                      'Arus kas defisit! Jika Anda mulai disiplin menabung 20% dari gaji (${_currencyFormat.format(simulatedSavings)}/bln), Anda masih butuh tambahan waktu ${_formatDuration(extraMonths)} dari rencana awal.',
-                ),
-              );
-            } else {
-              recommendations.add(
-                _buildRecommendationItem(
-                  icon: Icons.calendar_today,
-                  color: Colors.purple.shade600,
-                  text:
-                      'Arus kas defisit! Anda harus segera menabung minimal 20% dari pendapatan (${_currencyFormat.format(simulatedSavings)}/bln) agar target tercapai tepat waktu.',
-                ),
-              );
-            }
-          }
-        } else {
-          // Jika pendapatan 0
+        int totalMonthsNeeded = (gapFromNow / _monthlySavings).ceil();
+        
+        if (totalMonthsNeeded > 120) {
           recommendations.add(
             _buildRecommendationItem(
               icon: Icons.warning_amber_rounded,
               color: Colors.red.shade600,
               text:
-                  'Arus kas defisit. Silakan perbaiki pengeluaran dan cari tambahan pendapatan terlebih dahulu sebelum menargetkan budget pernikahan.',
+                  'Kapasitas menabung terlalu kecil. Butuh waktu lebih dari 10 tahun untuk target ini. Mohon kurangi budget pernikahan atau tambah penghasilan.',
+            ),
+          );
+        } else {
+          recommendations.add(
+            _buildRecommendationItem(
+              icon: Icons.calendar_today,
+              color: Colors.blue.shade600,
+              text:
+                  'Berdasarkan kapasitas menabung Anda, target dana akan terkumpul dan Anda dapat melangsungkan pernikahan dalam waktu ${_formatDuration(totalMonthsNeeded)}.',
+            ),
+          );
+        }
+      } else {
+        // Tidak bisa nabung (Defisit/Nol)
+        double simulatedSavings = income * 0.2; // Simulasi tabungan 20%
+
+        if (simulatedSavings > 0) {
+          int totalMonthsNeeded = (gapFromNow / simulatedSavings).ceil();
+
+          recommendations.add(
+            _buildRecommendationItem(
+              icon: Icons.calendar_today,
+              color: Colors.orange.shade600,
+              text:
+                  'Arus kas saat ini sedang defisit! Jika Anda menghemat dan menyisihkan 20% penghasilan (${_currencyFormat.format(simulatedSavings)}/bln), Anda dapat menikah dalam waktu ${_formatDuration(totalMonthsNeeded)}.',
+            ),
+          );
+        } else {
+          // Pendapatan 0
+          recommendations.add(
+            _buildRecommendationItem(
+              icon: Icons.warning_amber_rounded,
+              color: Colors.red.shade600,
+              text:
+                  'Anda tidak memiliki sisa pendapatan. Mohon perbaiki arus kas dan cari tambahan pendapatan untuk menabung biaya pernikahan.',
             ),
           );
         }

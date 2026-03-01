@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -21,7 +23,7 @@ class _StatsPageState extends State<StatsPage> {
     _loadData();
   }
 
-  void _loadData() async {
+  Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final savedDataString = prefs.getString('financialData');
     final savedPreScoreString = prefs.getString('readinessScore');
@@ -30,21 +32,48 @@ class _StatsPageState extends State<StatsPage> {
     setState(() {
       _phase = prefs.getString('phase');
 
-      // Load financial data
+      // Load financial data fallback
       if (savedDataString != null) {
         _financialData = jsonDecode(savedDataString);
       }
 
-      // Load readiness score for pre-marriage phase
+      // Load readiness score for pre-marriage phase fallback
       if (savedPreScoreString != null) {
         _score = int.tryParse(savedPreScoreString) ?? 0;
       }
 
-      // Load health score for post-marriage phase
+      // Load health score for post-marriage phase fallback
       if (savedPostScoreString != null) {
         _postScore = int.tryParse(savedPostScoreString) ?? 0;
       }
     });
+
+    // Overwrite with Firestore data if available
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('financial_data')
+            .doc('current')
+            .get();
+        if (doc.exists && mounted) {
+          final data = doc.data()!;
+          setState(() {
+            _financialData = data;
+            if (data.containsKey('readinessScore')) {
+              _score = data['readinessScore'];
+            }
+            if (data.containsKey('postMarriageScore')) {
+              _postScore = data['postMarriageScore'];
+            }
+          });
+        }
+      } catch (e) {
+        debugPrint("Error fetching from Firestore: $e");
+      }
+    }
   }
 
   double _getDouble(String key) {
