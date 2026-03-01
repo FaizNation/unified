@@ -117,7 +117,42 @@ class _ProfilePageState extends State<ProfilePage> {
     if (confirmClear == true) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('phase');
-      // SharedPreferences / Data clearing logic goes here
+      await prefs.remove('financialData');
+      await prefs.remove('transactions');
+
+      // Firestore deletion
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        try {
+          // 1. Check for family ID
+          String targetUid = user.uid;
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          if (userDoc.exists) {
+            final userData = userDoc.data()!;
+            if (userData.containsKey('familyId') &&
+                userData['familyId'] != null) {
+              targetUid = userData['familyId'];
+            }
+          }
+
+          // 2. Delete the financial_data document
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(targetUid)
+              .collection('financial_data')
+              .doc('current')
+              .delete();
+
+          // Optional: We could also delete the transactions collection here if needed,
+          // but clearing financial_data and SharedPreferences is enough to reset the "phase".
+        } catch (e) {
+          debugPrint("Failed to delete from Firestore: $e");
+        }
+      }
+
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
@@ -289,6 +324,43 @@ class _ProfilePageState extends State<ProfilePage> {
                     const SizedBox(height: 12),
 
                     _buildActionItem(
+                      title: 'Langganan Premium',
+                      subtitle: 'Buka fitur sinkronisasi dengan akun pasangan',
+                      icon: Icons.star_rounded,
+                      iconColor: Colors.amber.shade600,
+                      iconBgColor: Colors.amber.shade100,
+                      onTap: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Segera Hadir!'),
+                            content: const Text(
+                              'Fitur berlangganan Premium masih dalam tahap pengembangan. Saat ini fitur kolaborasi pasangan dapat digunakan secara gratis!',
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Mengerti', style: TextStyle(color: Colors.purple)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade500,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text('PRO', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    _buildActionItem(
                       title: 'Ubah Fase',
                       subtitle: 'Pra-nikah atau Pasca-nikah',
                       icon: Icons.favorite,
@@ -424,6 +496,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required Color iconColor,
     required Color iconBgColor,
     required VoidCallback onTap,
+    Widget? trailing,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -479,7 +552,9 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right, color: Colors.grey.shade400),
+                if (trailing != null) trailing,
+                if (trailing == null)
+                  Icon(Icons.chevron_right, color: Colors.grey.shade400),
               ],
             ),
           ),

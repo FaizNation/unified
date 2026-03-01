@@ -97,6 +97,28 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   void _handleViewDashboard() {
+    if (_financialData == null) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Data Belum Tersedia'),
+          content: const Text(
+            'Silakan gunakan menu "Setup Finansial" atau "Input Tambahan" untuk mengisi profil keuangan Anda terlebih dahulu sebelum dapat melihat halaman Dashboard.',
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Mengerti'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     if (_phase == "pre") {
       Navigator.pushNamed(context, '/pre-marriage');
     } else if (_phase == "post") {
