@@ -18,7 +18,6 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
   double _debtToIncome = 0;
   double _monthlySavings = 0;
   double _totalSavingsByWedding = 0;
-  int _recommendedMonths = 0;
 
   final _currencyFormat = NumberFormat.currency(
     locale: 'id_ID',
@@ -60,7 +59,9 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
   }
 
   void _calculateMetrics(Map<String, dynamic> data) {
-    final income = _parseDouble(data['monthlyIncome']);
+    final income =
+        _parseDouble(data['monthlyIncome']) +
+        _parseDouble(data['partnerIncome']);
     final expenses =
         _parseDouble(data['rentOrMortgage']) +
         _parseDouble(data['utilities']) +
@@ -69,9 +70,13 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
         _parseDouble(data['insurance']) +
         _parseDouble(data['entertainment']) +
         _parseDouble(data['otherExpenses']);
-    final debt = _parseDouble(data['debt']);
+
+    final currentSavings = _parseDouble(data['savings']);
     final assets = _parseDouble(data['assets']);
+    final startingWealth = currentSavings + assets;
+    final debt = _parseDouble(data['debt']);
     final weddingBudget = _parseDouble(data['weddingBudget']);
+
     int months = _parseDouble(
       data['monthsUntilWedding'],
       defaultValue: 12,
@@ -79,18 +84,17 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     if (months <= 0) months = 12; // fallback
 
     // Debt to Income Ratio
-    final dti = income > 0 ? (debt / income) * 100 : 0.0;
+    final dti = income > 0 ? (debt / income) * 100 : (debt > 0 ? 100.0 : 0.0);
 
     // Monthly Savings
     final savings = income - expenses;
 
     // Total savings by wedding
-    final totalSavings = (savings * months) + assets;
+    final totalSavings = (savings * months) + startingWealth;
 
     // Calculate readiness score (0-100)
     int score = 100;
 
-    // Debt to Income penalty (max -40 points)
     if (dti > 50)
       score -= 40;
     else if (dti > 30)
@@ -100,7 +104,6 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     else if (dti > 10)
       score -= 10;
 
-    // Savings vs Wedding Budget (max -40 points)
     final savingsGap = weddingBudget - totalSavings;
     if (savingsGap > weddingBudget * 0.5)
       score -= 40;
@@ -111,7 +114,6 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     else if (savingsGap > 0)
       score -= 10;
 
-    // Monthly savings ratio penalty (max -20 points)
     final savingsRatio = income > 0 ? (savings / income) * 100 : 0.0;
     if (savingsRatio < 10)
       score -= 20;
@@ -120,19 +122,11 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
 
     score = max(0, score);
 
-    // Determine status
     String statusStr = "red";
     if (score >= 70)
       statusStr = "green";
     else if (score >= 40)
       statusStr = "yellow";
-
-    // Calculate recommended months
-    int recMonths = months;
-    if (savingsGap > 0 && savings > 0) {
-      final recommended = (savingsGap / savings).ceil();
-      recMonths = recommended + months;
-    }
 
     setState(() {
       _debtToIncome = dti;
@@ -140,8 +134,20 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
       _totalSavingsByWedding = totalSavings;
       _readinessScore = score;
       _status = statusStr;
-      _recommendedMonths = recMonths;
     });
+  }
+
+  // Helper untuk mengubah total bulan menjadi format "X tahun Y bulan"
+  String _formatDuration(int totalMonths) {
+    if (totalMonths <= 0) return "0 bulan";
+    int years = totalMonths ~/ 12;
+    int months = totalMonths % 12;
+
+    List<String> parts = [];
+    if (years > 0) parts.add("$years tahun");
+    if (months > 0) parts.add("$months bulan");
+
+    return parts.join(" ");
   }
 
   Color _getStatusColor() {
@@ -205,6 +211,124 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     }
   }
 
+  // FUNGSI KHUSUS LOGIKA REKOMENDASI YANG CERDAS
+  List<Widget> _buildRecommendationList() {
+    List<Widget> recommendations = [];
+
+    if (_financialData == null) return recommendations;
+
+    double income =
+        _parseDouble(_financialData!['monthlyIncome']) +
+        _parseDouble(_financialData!['partnerIncome']);
+    double currentSavings = _parseDouble(_financialData!['savings']);
+    double assets = _parseDouble(_financialData!['assets']);
+    double startingWealth = currentSavings + assets;
+    double weddingBudget = _parseDouble(_financialData!['weddingBudget']);
+    int monthsUntilWedding = _parseDouble(
+      _financialData!['monthsUntilWedding'],
+      defaultValue: 12,
+    ).toInt();
+
+    // 1. Rekomendasi Hijau (Sukses)
+    if (_status == "green") {
+      recommendations.add(
+        _buildRecommendationItem(
+          icon: Icons.check_circle,
+          color: Colors.green.shade600,
+          text:
+              'Keuangan Anda sudah siap untuk menikah! Pertahankan pola tabungan yang baik.',
+        ),
+      );
+    }
+
+    // 2. Logika Target Budget Pernikahan
+    double gapAtWedding = weddingBudget - _totalSavingsByWedding;
+
+    if (gapAtWedding > 0) {
+      // Jika target dana TIDAK TERCAPAI pada bulan pernikahan
+      if (_monthlySavings > 0) {
+        // Jika nabung positif, hitung butuh tambahan berapa bulan lagi
+        int extraMonths = (gapAtWedding / _monthlySavings).ceil();
+        recommendations.add(
+          _buildRecommendationItem(
+            icon: Icons.calendar_today,
+            color: Colors.purple.shade600,
+            text:
+                'Dana belum mencukupi target. Anda perlu menunda pernikahan sekitar ${_formatDuration(extraMonths)} lagi, atau kurangi budget pernikahan Anda.',
+          ),
+        );
+      } else {
+        // Jika minus/defisit (TIDAK BISA NABUNG)
+        double simulatedSavings =
+            income * 0.2; // Simulasi jika dia dipaksa nabung 20%
+
+        if (simulatedSavings > 0) {
+          double gapFromNow = weddingBudget - startingWealth;
+          if (gapFromNow > 0) {
+            int totalMonthsNeeded = (gapFromNow / simulatedSavings).ceil();
+            int extraMonths = totalMonthsNeeded - monthsUntilWedding;
+
+            if (extraMonths > 0) {
+              recommendations.add(
+                _buildRecommendationItem(
+                  icon: Icons.calendar_today,
+                  color: Colors.purple.shade600,
+                  text:
+                      'Arus kas defisit! Jika Anda mulai disiplin menabung 20% dari gaji (${_currencyFormat.format(simulatedSavings)}/bln), Anda masih butuh tambahan waktu ${_formatDuration(extraMonths)} dari rencana awal.',
+                ),
+              );
+            } else {
+              recommendations.add(
+                _buildRecommendationItem(
+                  icon: Icons.calendar_today,
+                  color: Colors.purple.shade600,
+                  text:
+                      'Arus kas defisit! Anda harus segera menabung minimal 20% dari pendapatan (${_currencyFormat.format(simulatedSavings)}/bln) agar target tercapai tepat waktu.',
+                ),
+              );
+            }
+          }
+        } else {
+          // Jika pendapatan 0
+          recommendations.add(
+            _buildRecommendationItem(
+              icon: Icons.warning_amber_rounded,
+              color: Colors.red.shade600,
+              text:
+                  'Arus kas defisit. Silakan perbaiki pengeluaran dan cari tambahan pendapatan terlebih dahulu sebelum menargetkan budget pernikahan.',
+            ),
+          );
+        }
+      }
+    }
+
+    // 3. Logika Hutang (DTI)
+    if (_debtToIncome > 30) {
+      recommendations.add(
+        _buildRecommendationItem(
+          icon: Icons.money_off,
+          color: Colors.purple.shade600,
+          text:
+              'Fokus melunasi hutang terlebih dahulu. Targetkan rasio hutang di bawah 30% dari pendapatan bulanan Anda.',
+        ),
+      );
+    }
+
+    // 4. Logika Tabungan Bulanan Terlalu Kecil
+    if (_monthlySavings > 0 && _monthlySavings < income * 0.2) {
+      recommendations.add(
+        _buildRecommendationItem(
+          icon: Icons.account_balance_wallet,
+          color: Colors.purple.shade600,
+          text:
+              'Tingkatkan tabungan bulanan minimal 20% dari pendapatan total dengan mengurangi pengeluaran konsumtif.',
+        ),
+      );
+    }
+
+    return recommendations;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_financialData == null) {
@@ -212,10 +336,6 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     }
 
     double weddingBudget = _parseDouble(_financialData!['weddingBudget']);
-    int monthsUntilWedding = _parseDouble(
-      _financialData!['monthsUntilWedding'],
-      defaultValue: 12,
-    ).toInt();
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -365,7 +485,7 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          if (_debtToIncome < 30)
+                          if (_debtToIncome <= 30)
                             Text(
                               'Sehat',
                               style: TextStyle(
@@ -373,7 +493,7 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
                                 fontWeight: FontWeight.w500,
                               ),
                             )
-                          else if (_debtToIncome < 50)
+                          else if (_debtToIncome <= 50)
                             Text(
                               'Hati-hati',
                               style: TextStyle(
@@ -399,9 +519,9 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
                           minHeight: 8,
                           backgroundColor: Colors.grey.shade200,
                           valueColor: AlwaysStoppedAnimation<Color>(
-                            _debtToIncome < 30
+                            _debtToIncome <= 30
                                 ? Colors.green.shade500
-                                : _debtToIncome < 50
+                                : _debtToIncome <= 50
                                 ? Colors.orange.shade500
                                 : Colors.red.shade500,
                           ),
@@ -457,12 +577,22 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
                       const SizedBox(height: 20),
                       _buildProjectionRow(
                         'Tabungan per bulan',
-                        _currencyFormat.format(_monthlySavings),
+                        _monthlySavings < 0
+                            ? "-${_currencyFormat.format(_monthlySavings.abs())}"
+                            : _currencyFormat.format(_monthlySavings),
+                        valueColor: _monthlySavings < 0
+                            ? Colors.red.shade600
+                            : null,
                       ),
                       const SizedBox(height: 12),
                       _buildProjectionRow(
                         'Total saat menikah',
-                        _currencyFormat.format(_totalSavingsByWedding),
+                        _totalSavingsByWedding < 0
+                            ? "-${_currencyFormat.format(_totalSavingsByWedding.abs())}"
+                            : _currencyFormat.format(_totalSavingsByWedding),
+                        valueColor: _totalSavingsByWedding < 0
+                            ? Colors.red.shade600
+                            : null,
                       ),
                       const SizedBox(height: 12),
                       _buildProjectionRow(
@@ -501,38 +631,8 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
                       ),
                       const SizedBox(height: 16),
 
-                      if (_status == "green")
-                        _buildRecommendationItem(
-                          icon: Icons.check_circle,
-                          color: Colors.green.shade600,
-                          text:
-                              'Keuangan Anda sudah siap untuk menikah! Pertahankan pola tabungan yang baik.',
-                        )
-                      else ...[
-                        if (_totalSavingsByWedding < weddingBudget)
-                          _buildRecommendationItem(
-                            icon: Icons.calendar_today,
-                            color: Colors.purple.shade600,
-                            text:
-                                'Pertimbangkan untuk menunda pernikahan ${_recommendedMonths - monthsUntilWedding} bulan lagi atau kurangi budget menjadi ${_currencyFormat.format(_totalSavingsByWedding)}.',
-                          ),
-                        if (_debtToIncome > 30)
-                          _buildRecommendationItem(
-                            icon: Icons.warning_amber_rounded,
-                            color: Colors.purple.shade600,
-                            text:
-                                'Fokus melunasi hutang terlebih dahulu. Targetkan rasio hutang di bawah 30% dari pendapatan bulanan.',
-                          ),
-                        if (_monthlySavings <
-                            _parseDouble(_financialData!['monthlyIncome']) *
-                                0.2)
-                          _buildRecommendationItem(
-                            icon: Icons.account_balance_wallet,
-                            color: Colors.purple.shade600,
-                            text:
-                                'Tingkatkan tabungan bulanan minimal 20% dari pendapatan dengan mengurangi pengeluaran tidak penting.',
-                          ),
-                      ],
+                      // Menggunakan fungsi pembuat List Widget
+                      ..._buildRecommendationList(),
                     ],
                   ),
                 ),
@@ -545,7 +645,7 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
     );
   }
 
-  Widget _buildProjectionRow(String label, String value) {
+  Widget _buildProjectionRow(String label, String value, {Color? valueColor}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -555,7 +655,11 @@ class _PreMarriagePageState extends State<PreMarriagePage> {
         ),
         Text(
           value,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: valueColor ?? Colors.black87,
+          ),
         ),
       ],
     );
