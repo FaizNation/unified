@@ -5,6 +5,10 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
+import 'pages/onboarding_page.dart';
+import 'pages/financial_input_page.dart';
+import 'pages/post_marriage_page.dart';
+import 'pages/pre_marriage_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,9 +23,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Auth App',
+      title: 'Unified App',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFDB2777),
+        ), // Using a pink core color
       ),
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
@@ -38,6 +44,14 @@ class MyApp extends StatelessWidget {
           );
         },
       ),
+      routes: {
+        '/login': (context) => const LoginPage(),
+        '/home': (context) => const HomePage(),
+        '/onboarding': (context) => const OnboardingPage(),
+        '/financial-input': (context) => const FinancialInputPage(),
+        '/post-marriage': (context) => const PostMarriagePage(),
+        '/pre-marriage': (context) => const PreMarriagePage(),
+      },
     );
   }
 }
